@@ -1093,11 +1093,20 @@ void bar_manager_destroy(struct bar_manager* bar_manager) {
   image_destroy(&bar_manager->current_artwork);
 }
 
+// topmost reports on for both levels, so the level needs its own field. It is
+// derived rather than stored, because window_level already holds the answer.
+static char* format_topmost_level(uint32_t window_level) {
+  if (window_level == kCGFloatingWindowLevel) return ARGUMENT_WINDOW;
+  if (window_level == kCGStatusWindowLevel) return ARGUMENT_DISPLAY_ALL;
+  return ARGUMENT_COMMON_VAL_OFF;
+}
+
 void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
   char indent[] = { "\t" };
   fprintf(rsp, "{\n"
                "%s\"position\": \"%s\",\n"
                "%s\"topmost\": \"%s\",\n"
+               "%s\"topmost_level\": \"%s\",\n"
                "%s\"sticky\": \"%s\",\n"
                "%s\"hidden\": \"%s\",\n"
                "%s\"shadow\": \"%s\",\n"
@@ -1108,6 +1117,7 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
                indent, bar_manager->position == POSITION_BOTTOM
                                               ? "bottom" : "top",
                indent, format_bool(bar_manager->topmost),
+               indent, format_topmost_level(bar_manager->window_level),
                indent, format_bool(bar_manager->sticky),
                indent, format_bool(bar_manager->any_bar_hidden),
                indent, format_bool(bar_manager->shadow),
