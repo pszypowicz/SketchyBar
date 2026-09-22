@@ -259,9 +259,40 @@ bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smooth
   return true;
 }
 
+bool bar_manager_bar_belongs_on_space(struct bar_manager* bar_manager, uint64_t dsid) {
+  return SLSSpaceGetType(g_connection, dsid) != 4
+         || bar_manager->show_in_fullscreen;
+}
+
+// Re-evaluates bar visibility against the spaces that are on screen right now.
+// Without this a show_in_fullscreen change only lands on the next space change.
+bool bar_manager_update_shown(struct bar_manager* bar_manager) {
+  bool changed = false;
+  for (int i = 0; i < bar_manager->bar_count; i++) {
+    struct bar* bar = bar_manager->bars[i];
+    bool was_shown = bar->shown;
+    bar->shown = bar_manager_bar_belongs_on_space(bar_manager,
+                                                  display_space_id(bar->did));
+
+    if (was_shown == bar->shown) continue;
+    bar_manager->needs_ordering |= bar->shown;
+    changed = true;
+  }
+
+  if (changed) {
+    // bar_resize is what parks a hidden bar off screen, so a visibility change
+    // only lands if the resize pass runs.
+    bar_manager->bar_needs_resize = true;
+    bar_manager->bar_needs_update = true;
+  }
+
+  return changed;
+}
+
 bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen) {
     if (bar_manager->show_in_fullscreen == show_in_fullscreen) return false;
     bar_manager->show_in_fullscreen = show_in_fullscreen;
+    bar_manager_update_shown(bar_manager);
     return true;
 }
 
@@ -953,7 +984,8 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
     bar_manager->bars[i]->sid = mission_control_index(dsid);
 
     bool was_shown = bar_manager->bars[i]->shown;
-    bar_manager->bars[i]->shown = SLSSpaceGetType(g_connection, dsid) != 4 || bar_manager->show_in_fullscreen;
+    bar_manager->bars[i]->shown = bar_manager_bar_belongs_on_space(bar_manager,
+                                                                   dsid       );
 
     bar_manager->needs_ordering |= !was_shown && bar_manager->bars[i]->shown;
     force_refresh |= !was_shown && bar_manager->bars[i]->shown;
