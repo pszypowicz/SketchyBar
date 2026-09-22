@@ -34,8 +34,8 @@ void bar_manager_init(struct bar_manager* bar_manager) {
   bar_manager->margin = 0;
   bar_manager->frozen = false;
   bar_manager->sleeps = false;
-  bar_manager->window_level = kCGBackstopMenuLevel;
-  bar_manager->topmost = false;
+  bar_manager->topmost = (struct display_selection) {0};
+  bar_manager->topmost_window_level = (struct display_selection) {0};
   bar_manager->notch_width = 200;
   bar_manager->notch_offset = 0;
   bar_manager->notch_display_height = 0;
@@ -44,7 +44,7 @@ void bar_manager_init(struct bar_manager* bar_manager) {
 
   bar_manager->sticky = true;
 
-  bar_manager->show_in_fullscreen = false;
+  bar_manager->show_in_fullscreen = (struct display_selection) {0};
 
   image_init(&bar_manager->current_artwork);
   background_init(&bar_manager->background);
@@ -259,10 +259,192 @@ bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smooth
   return true;
 }
 
-bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen) {
-    if (bar_manager->show_in_fullscreen == show_in_fullscreen) return false;
-    bar_manager->show_in_fullscreen = show_in_fullscreen;
-    return true;
+extern int workspace_display_notch_height(uint32_t did);
+
+uint32_t display_selector_parse(struct token token, bool* error) {
+  uint32_t selector = DISPLAY_SELECTOR_NONE;
+  uint32_t count = 0;
+  char** list = token_split(token, ',', &count);
+  if (!list || count == 0) {
+    if (list) free(list);
+    *error = true;
+    return DISPLAY_SELECTOR_NONE;
+  }
+
+  for (uint32_t i = 0; i < count; i++) {
+    if (strcmp(list[i], ARGUMENT_DISPLAY_ALL) == 0) {
+      selector |= DISPLAY_SELECTOR_ALL;
+    } else if (strcmp(list[i], ARGUMENT_DISPLAY_MAIN) == 0) {
+      selector |= DISPLAY_SELECTOR_MAIN;
+    } else if (strcmp(list[i], ARGUMENT_DISPLAY_NOTCHED) == 0) {
+      selector |= DISPLAY_SELECTOR_NOTCHED;
+    } else {
+      char* end = NULL;
+      unsigned long index = strtoul(list[i], &end, 0);
+      if (end == list[i] || *end != '\0'
+          || index < 1 || index > DISPLAY_SELECTOR_MAX_INDEX) {
+        *error = true;
+      } else {
+        selector |= 1u << (index - 1);
+      }
+    }
+  }
+
+  free(list);
+  return selector;
+}
+
+bool display_selector_matches(uint32_t selector, struct bar* bar) {
+  if (selector == DISPLAY_SELECTOR_NONE || !bar) return false;
+  if (selector & DISPLAY_SELECTOR_ALL) return true;
+
+  if ((selector & DISPLAY_SELECTOR_MAIN)
+      && bar->did == display_main_display_id()) return true;
+
+  if ((selector & DISPLAY_SELECTOR_NOTCHED)
+      && workspace_display_notch_height(bar->did) > 0) return true;
+
+  return bar->adid >= 1 && bar->adid <= DISPLAY_SELECTOR_MAX_INDEX
+         && (selector & (1u << (bar->adid - 1)));
+}
+
+// An "all" selector replaces the whole selection, so that a bare property=off
+// still clears every display, as it did before selectors existed.
+void display_selection_apply(struct display_selection* selection, uint32_t selector, bool enable) {
+  if (selector == DISPLAY_SELECTOR_NONE) return;
+
+  if (selector & DISPLAY_SELECTOR_ALL) {
+    selection->enabled = enable ? DISPLAY_SELECTOR_ALL : DISPLAY_SELECTOR_NONE;
+    selection->disabled = DISPLAY_SELECTOR_NONE;
+    return;
+  }
+
+  if (enable) {
+    selection->enabled |= selector;
+    selection->disabled &= ~selector;
+  } else {
+    selection->disabled |= selector;
+    selection->enabled &= ~selector;
+  }
+}
+
+bool display_selection_matches(struct display_selection* selection, struct bar* bar) {
+  if (display_selector_matches(selection->disabled, bar)) return false;
+  return display_selector_matches(selection->enabled, bar);
+}
+
+// Whether every display the selector names is currently on. Toggling reads this
+// so that a scoped toggle follows the scoped state, not the global one.
+bool display_selection_covers(struct display_selection* selection, uint32_t selector) {
+  if (selector == DISPLAY_SELECTOR_NONE) return false;
+  if (selector & selection->disabled) return false;
+  if (selection->enabled & DISPLAY_SELECTOR_ALL) return true;
+  return (selection->enabled & selector) == selector;
+}
+
+static size_t display_selector_append(uint32_t selector, const char* prefix, char* buffer, size_t length, size_t cursor) {
+  if (selector == DISPLAY_SELECTOR_NONE) return cursor;
+
+  struct { uint32_t bit; const char* name; } keywords[] = {
+    { DISPLAY_SELECTOR_ALL,     "all"     },
+    { DISPLAY_SELECTOR_MAIN,    "main"    },
+    { DISPLAY_SELECTOR_NOTCHED, "notched" },
+  };
+
+  for (uint32_t i = 0; i < 3 && cursor < length; i++) {
+    if (!(selector & keywords[i].bit)) continue;
+    cursor += snprintf(buffer + cursor, length - cursor, "%s%s%s",
+                       cursor ? "," : "", prefix, keywords[i].name);
+  }
+
+  for (uint32_t i = 1; i <= DISPLAY_SELECTOR_MAX_INDEX && cursor < length; i++) {
+    if (!(selector & (1u << (i - 1)))) continue;
+    cursor += snprintf(buffer + cursor, length - cursor, "%s%s%u",
+                       cursor ? "," : "", prefix, i);
+  }
+
+  return cursor;
+}
+
+void display_selection_format(struct display_selection* selection, char* buffer, size_t length) {
+  if (length == 0) return;
+  buffer[0] = '\0';
+
+  if (selection->enabled == DISPLAY_SELECTOR_NONE) {
+    snprintf(buffer, length, "off");
+    return;
+  }
+  if (selection->enabled == DISPLAY_SELECTOR_ALL
+      && selection->disabled == DISPLAY_SELECTOR_NONE) {
+    snprintf(buffer, length, "on");
+    return;
+  }
+
+  size_t cursor = display_selector_append(selection->enabled, "",
+                                          buffer, length, 0      );
+  display_selector_append(selection->disabled, "!", buffer, length, cursor);
+}
+
+uint32_t bar_manager_window_level(struct bar_manager* bar_manager, struct bar* bar) {
+  if (!display_selection_matches(&bar_manager->topmost, bar))
+    return kCGBackstopMenuLevel;
+
+  return display_selection_matches(&bar_manager->topmost_window_level, bar)
+         ? kCGFloatingWindowLevel
+         : kCGStatusWindowLevel;
+}
+
+bool bar_manager_topmost_active(struct bar_manager* bar_manager, uint32_t selector) {
+  return display_selection_covers(&bar_manager->topmost, selector);
+}
+
+bool bar_manager_show_in_fullscreen_active(struct bar_manager* bar_manager, uint32_t selector) {
+  return display_selection_covers(&bar_manager->show_in_fullscreen, selector);
+}
+
+bool bar_manager_bar_belongs_on_space(struct bar_manager* bar_manager, struct bar* bar, uint64_t dsid) {
+  return SLSSpaceGetType(g_connection, dsid) != 4
+         || display_selection_matches(&bar_manager->show_in_fullscreen, bar);
+}
+
+// Re-evaluates bar visibility against the spaces that are on screen right now.
+// Without this a selector change only takes effect on the next space change.
+bool bar_manager_update_shown(struct bar_manager* bar_manager) {
+  bool changed = false;
+  for (int i = 0; i < bar_manager->bar_count; i++) {
+    struct bar* bar = bar_manager->bars[i];
+    bool was_shown = bar->shown;
+    bar->shown = bar_manager_bar_belongs_on_space(bar_manager,
+                                                  bar,
+                                                  display_space_id(bar->did));
+
+    if (was_shown == bar->shown) continue;
+    bar_manager->needs_ordering |= bar->shown;
+    changed = true;
+  }
+
+  if (changed) {
+    // bar_resize is what parks a hidden bar off screen, so a visibility change
+    // only lands if the resize pass runs.
+    bar_manager->bar_needs_resize = true;
+    bar_manager->bar_needs_update = true;
+  }
+
+  return changed;
+}
+
+bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, uint32_t selector, bool show_in_fullscreen) {
+  struct display_selection previous = bar_manager->show_in_fullscreen;
+  display_selection_apply(&bar_manager->show_in_fullscreen,
+                          selector,
+                          show_in_fullscreen               );
+
+  if (previous.enabled == bar_manager->show_in_fullscreen.enabled
+      && previous.disabled == bar_manager->show_in_fullscreen.disabled)
+    return false;
+
+  bar_manager_update_shown(bar_manager);
+  return true;
 }
 
 bool bar_manager_set_hidden(struct bar_manager *bar_manager, uint32_t adid, bool hidden) {
@@ -288,19 +470,26 @@ bool bar_manager_set_hidden(struct bar_manager *bar_manager, uint32_t adid, bool
   return true;
 }
 
-bool bar_manager_set_topmost(struct bar_manager *bar_manager, char level, bool topmost) {
-  if (topmost) {
-    if (level == TOPMOST_LEVEL_WINDOW) {
-      bar_manager->window_level = kCGFloatingWindowLevel;
-    } else if (level == TOPMOST_LEVEL_ALL) {
-      bar_manager->window_level = kCGStatusWindowLevel;
-    }
-  } else {
-    bar_manager->window_level = kCGBackstopMenuLevel;
-  }
+bool bar_manager_set_topmost(struct bar_manager *bar_manager, char level, uint32_t selector, bool topmost) {
+  struct display_selection previous = bar_manager->topmost;
+  struct display_selection previous_level = bar_manager->topmost_window_level;
+
+  display_selection_apply(&bar_manager->topmost, selector, topmost);
+
+  // The level only means anything where topmost is on, so it follows the same
+  // selector and stays untouched when a scoped write turns displays off.
+  if (topmost)
+    display_selection_apply(&bar_manager->topmost_window_level,
+                            selector,
+                            level == TOPMOST_LEVEL_WINDOW      );
+
+  if (previous.enabled == bar_manager->topmost.enabled
+      && previous.disabled == bar_manager->topmost.disabled
+      && previous_level.enabled == bar_manager->topmost_window_level.enabled
+      && previous_level.disabled == bar_manager->topmost_window_level.disabled)
+    return false;
 
   bar_manager_reset(bar_manager);
-  bar_manager->topmost = topmost;
   return true;
 }
 
@@ -589,8 +778,7 @@ void bar_manager_begin(struct bar_manager* bar_manager) {
                                 sizeof(struct bar *) * bar_manager->bar_count);
 
     memset(bar_manager->bars, 0, sizeof(struct bar*) * bar_manager->bar_count);
-    bar_manager->bars[0] = bar_create(did);
-    bar_manager->bars[0]->adid = display_arrangement(did);
+    bar_manager->bars[0] = bar_create(did, display_arrangement(did));
   }
   else {
     uint32_t display_count = display_active_display_count();
@@ -611,8 +799,7 @@ void bar_manager_begin(struct bar_manager* bar_manager) {
     for (uint32_t index = 1; index <= display_count; index++) {
       if (!(bar_manager->displays & 1 << (index - 1))) continue;
       uint32_t did = display_arrangement_display_id(index);
-      bar_manager->bars[bar_index] = bar_create(did);
-      bar_manager->bars[bar_index]->adid = index;
+      bar_manager->bars[bar_index] = bar_create(did, index);
       if (bar_manager->any_bar_hidden)
         bar_set_hidden(bar_manager->bars[bar_index], true);
 
@@ -953,7 +1140,10 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
     bar_manager->bars[i]->sid = mission_control_index(dsid);
 
     bool was_shown = bar_manager->bars[i]->shown;
-    bar_manager->bars[i]->shown = SLSSpaceGetType(g_connection, dsid) != 4 || bar_manager->show_in_fullscreen;
+    bar_manager->bars[i]->shown = bar_manager_bar_belongs_on_space(
+                                                       bar_manager,
+                                                       bar_manager->bars[i],
+                                                       dsid                 );
 
     bar_manager->needs_ordering |= !was_shown && bar_manager->bars[i]->shown;
     force_refresh |= !was_shown && bar_manager->bars[i]->shown;
@@ -1095,6 +1285,15 @@ void bar_manager_destroy(struct bar_manager* bar_manager) {
 
 void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
   char indent[] = { "\t" };
+  char topmost[256];
+  char show_in_fullscreen[256];
+  display_selection_format(&bar_manager->topmost,
+                           topmost,
+                           sizeof(topmost)       );
+  display_selection_format(&bar_manager->show_in_fullscreen,
+                           show_in_fullscreen,
+                           sizeof(show_in_fullscreen)       );
+
   fprintf(rsp, "{\n"
                "%s\"position\": \"%s\",\n"
                "%s\"topmost\": \"%s\",\n"
@@ -1107,12 +1306,12 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
                "%s\"margin\": %d,\n",
                indent, bar_manager->position == POSITION_BOTTOM
                                               ? "bottom" : "top",
-               indent, format_bool(bar_manager->topmost),
+               indent, topmost,
                indent, format_bool(bar_manager->sticky),
                indent, format_bool(bar_manager->any_bar_hidden),
                indent, format_bool(bar_manager->shadow),
                indent, format_bool(bar_manager->font_smoothing),
-               indent, format_bool(bar_manager->show_in_fullscreen),
+               indent, show_in_fullscreen,
                indent, bar_manager->blur_radius,
                indent, bar_manager->margin         );
 

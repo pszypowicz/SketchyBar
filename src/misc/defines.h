@@ -103,6 +103,8 @@
 #define PROPERTY_PERCENTAGE                    "percentage"
 #define PROPERTY_MAX_CHARS                     "max_chars"
 
+#define DOMAIN_DISPLAY                         "--display"
+
 #define DOMAIN_BAR                             "--bar"
 #define PROPERTY_POSITION                      "position"
 #define PROPERTY_MARGIN                        "margin"
@@ -170,6 +172,7 @@
 
 #define ARGUMENT_DISPLAY_MAIN                  "main"
 #define ARGUMENT_DISPLAY_ALL                   "all"
+#define ARGUMENT_DISPLAY_NOTCHED               "notched"
 
 #define ARGUMENT_UPDATES_WHEN_SHOWN            "when_shown"
 #define ARGUMENT_DYNAMIC                       "dynamic"

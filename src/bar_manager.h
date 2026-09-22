@@ -12,13 +12,29 @@ typedef CLOCK_CALLBACK(clock_callback);
 #define TOPMOST_LEVEL_WINDOW 'w'
 #define TOPMOST_LEVEL_ALL    'a'
 
+// A display selector names the displays a bar property applies to. The low bits
+// are arrangement indices, the high bits are keywords that only resolve against
+// a live display, because the notch and the main display move between indices.
+#define DISPLAY_SELECTOR_NONE      0u
+#define DISPLAY_SELECTOR_MAX_INDEX 29
+#define DISPLAY_SELECTOR_NOTCHED (1u << 29)
+#define DISPLAY_SELECTOR_MAIN    (1u << 30)
+#define DISPLAY_SELECTOR_ALL     (1u << 31)
+
+// Enabled and disabled are tracked apart so that a scoped write can carve a
+// display out of a broader one. Clearing an index bit out of "all" would leave
+// the "all" keyword standing and match every display again.
+struct display_selection {
+  uint32_t enabled;
+  uint32_t disabled;
+};
+
 struct bar_manager {
   CFRunLoopTimerRef clock;
 
   bool frozen;
   bool sleeps;
   bool shadow;
-  bool topmost;
   bool sticky;
   bool font_smoothing;
   bool any_bar_hidden;
@@ -26,7 +42,10 @@ struct bar_manager {
   bool might_need_clipping;
   bool bar_needs_update;
   bool bar_needs_resize;
-  bool show_in_fullscreen;
+
+  struct display_selection topmost;
+  struct display_selection topmost_window_level;
+  struct display_selection show_in_fullscreen;
 
   uint32_t displays;
   char position;
@@ -37,7 +56,6 @@ struct bar_manager {
   uint32_t notch_offset;
   uint32_t notch_display_height;
   uint32_t active_adid;
-  uint32_t window_level;
 
   struct bar** bars;
   uint32_t bar_count;
@@ -75,11 +93,24 @@ bool bar_manager_set_spaces(struct bar_manager* bar_manager, bool value);
 bool bar_manager_set_spaces_for_all_displays(struct bar_manager* bar_manager, bool value);
 bool bar_manager_set_displays(struct bar_manager* bar_manager, uint32_t displays);
 bool bar_manager_set_hidden(struct bar_manager* bar_manager, uint32_t sid, bool hidden);
-bool bar_manager_set_topmost(struct bar_manager* bar_manager, char level, bool topmost);
+bool bar_manager_set_topmost(struct bar_manager* bar_manager, char level, uint32_t selector, bool topmost);
+bool bar_manager_topmost_active(struct bar_manager* bar_manager, uint32_t selector);
+bool bar_manager_show_in_fullscreen_active(struct bar_manager* bar_manager, uint32_t selector);
 bool bar_manager_set_sticky(struct bar_manager *bar_manager, bool sticky);
 bool bar_manager_set_shadow(struct bar_manager* bar_manager, bool shadow);
 bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smoothing);
-bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen);
+bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, uint32_t selector, bool show_in_fullscreen);
+bool bar_manager_bar_belongs_on_space(struct bar_manager* bar_manager, struct bar* bar, uint64_t dsid);
+bool bar_manager_update_shown(struct bar_manager* bar_manager);
+uint32_t bar_manager_window_level(struct bar_manager* bar_manager, struct bar* bar);
+
+uint32_t display_selector_parse(struct token token, bool* error);
+bool display_selector_matches(uint32_t selector, struct bar* bar);
+
+void display_selection_apply(struct display_selection* selection, uint32_t selector, bool enable);
+bool display_selection_matches(struct display_selection* selection, struct bar* bar);
+bool display_selection_covers(struct display_selection* selection, uint32_t selector);
+void display_selection_format(struct display_selection* selection, char* buffer, size_t length);
 bool bar_manager_set_notch_width(struct bar_manager* bar_manager, uint32_t width);
 bool bar_manager_set_notch_offset(struct bar_manager* bar_manager, uint32_t offset);
 bool bar_manager_set_notch_display_height(struct bar_manager* bar_manager, uint32_t offset);
