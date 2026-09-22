@@ -7,6 +7,9 @@ struct bar {
   bool shown;
   bool hidden;
   bool mouse_over;
+  // Cached because the layout path reads it on every pass, and the notch of a
+  // given display never changes. did is only assigned in bar_create.
+  bool has_notch;
 
   uint32_t sid;
   uint32_t dsid;
