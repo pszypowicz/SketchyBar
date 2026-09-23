@@ -270,11 +270,20 @@ bool bar_manager_update_shown(struct bar_manager* bar_manager) {
   bool changed = false;
   for (int i = 0; i < bar_manager->bar_count; i++) {
     struct bar* bar = bar_manager->bars[i];
+    uint64_t dsid = display_space_id(bar->did);
     bool was_shown = bar->shown;
-    bar->shown = bar_manager_bar_belongs_on_space(bar_manager,
-                                                  display_space_id(bar->did));
+    bar->shown = bar_manager_bar_belongs_on_space(bar_manager, dsid);
 
     if (was_shown == bar->shown) continue;
+
+    // A non-sticky bar lives on a system space, and the space change handler
+    // moves its windows only while it is shown. A bar that becomes shown here
+    // can still sit on its previous space, so move it along with the flag.
+    if (bar->shown && !bar_manager->sticky) {
+      bar->dsid = dsid;
+      bar_change_space(bar, dsid);
+    }
+
     bar_manager->needs_ordering |= bar->shown;
     changed = true;
   }
@@ -622,6 +631,8 @@ void bar_manager_begin(struct bar_manager* bar_manager) {
     memset(bar_manager->bars, 0, sizeof(struct bar*) * bar_manager->bar_count);
     bar_manager->bars[0] = bar_create(did);
     bar_manager->bars[0]->adid = display_arrangement(did);
+    if (bar_manager->any_bar_hidden)
+      bar_set_hidden(bar_manager->bars[0], true);
   }
   else {
     uint32_t display_count = display_active_display_count();
