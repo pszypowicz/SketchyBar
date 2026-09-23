@@ -200,7 +200,8 @@ void bar_draw(struct bar* bar, bool forced) {
 }
 
 static void bar_calculate_bounds_top_bottom(struct bar* bar) {
-  uint32_t notch_width = bar->has_notch ? g_bar_manager.notch_width : 0;
+  bool has_notch = workspace_display_notch_height(bar->did) > 0;
+  uint32_t notch_width = has_notch ? g_bar_manager.notch_width : 0;
 
   uint32_t center_length = bar_manager_length_for_bar_side(&g_bar_manager,
                                                            bar,
@@ -436,8 +437,9 @@ void bar_calculate_bounds(struct bar* bar) {
 }
 
 static CGRect bar_get_frame(struct bar *bar) {
-  int notch_offset = bar->has_notch ? g_bar_manager.notch_offset : 0;
-  int notch_display_height = bar->has_notch
+  bool has_notch = workspace_display_notch_height(bar->did) > 0;
+  int notch_offset = has_notch ? g_bar_manager.notch_offset : 0;
+  int notch_display_height = has_notch
                              ? g_bar_manager.notch_display_height
                              : 0;
 
@@ -540,7 +542,6 @@ struct bar *bar_create(uint32_t did) {
   bar->hidden = false;
   bar->mouse_over = false;
   bar->did = did;
-  bar->has_notch = workspace_display_notch_height(did) > 0;
   bar->dsid = display_space_id(did);
   bar->sid = mission_control_index(bar->dsid);
   bar->shown = SLSSpaceGetType(g_connection, bar->dsid) != 4;
