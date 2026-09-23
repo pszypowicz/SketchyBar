@@ -80,6 +80,8 @@ bool bar_manager_set_sticky(struct bar_manager *bar_manager, bool sticky);
 bool bar_manager_set_shadow(struct bar_manager* bar_manager, bool shadow);
 bool bar_manager_set_font_smoothing(struct bar_manager* bar_manager, bool smoothing);
 bool bar_manager_set_show_in_fullscreen(struct bar_manager* bar_manager, bool show_in_fullscreen);
+bool bar_manager_bar_belongs_on_space(struct bar_manager* bar_manager, uint64_t dsid);
+bool bar_manager_update_shown(struct bar_manager* bar_manager);
 bool bar_manager_set_notch_width(struct bar_manager* bar_manager, uint32_t width);
 bool bar_manager_set_notch_offset(struct bar_manager* bar_manager, uint32_t offset);
 bool bar_manager_set_notch_display_height(struct bar_manager* bar_manager, uint32_t offset);
