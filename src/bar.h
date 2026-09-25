@@ -7,6 +7,7 @@ struct bar {
   bool shown;
   bool hidden;
   bool mouse_over;
+  bool on_fullscreen_space;
 
   uint32_t sid;
   uint32_t dsid;
