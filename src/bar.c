@@ -81,7 +81,8 @@ static void bar_calculate_popup_anchor_for_bar_item(struct bar* bar, struct bar_
 
 void bar_order_item_windows(struct bar* bar) {
   if (bar->sid < 1 || bar->adid < 1 || !bar->shown) return;
-  window_set_level(&bar->window, g_bar_manager.window_level);
+  bar->window_level = bar_manager_window_level(&g_bar_manager, bar);
+  window_set_level(&bar->window, bar->window_level);
   window_order(&bar->window, NULL, W_ABOVE);
 
   struct window* previous_window = NULL;
@@ -91,7 +92,7 @@ void bar_order_item_windows(struct bar* bar) {
     if (bar_item->position == POSITION_POPUP) continue;
 
     struct window* window = bar_item_get_window(bar_item, bar->adid);
-    window_set_level(window, g_bar_manager.window_level);
+    window_set_level(window, bar->window_level);
 
     if (!first_window) first_window = window;
 
@@ -455,7 +456,8 @@ static CGRect bar_get_frame(struct bar *bar) {
 
     origin.y += g_bar_manager.background.y_offset;
 
-    if (display_menu_bar_visible() && !g_bar_manager.topmost) {
+    if (display_menu_bar_visible()
+        && !display_selection_matches(&g_bar_manager.topmost, bar)) {
       CGRect menu = display_menu_bar_rect(bar->did);
       origin.y += menu.size.height;
       bounds.size.height -= menu.size.height;
@@ -475,7 +477,8 @@ static CGRect bar_get_frame(struct bar *bar) {
       origin.y = CGRectGetMaxY(bounds)
                  - g_bar_manager.background.bounds.size.height
                  - 2*(g_bar_manager.background.y_offset) - notch_offset;
-    } else if (display_menu_bar_visible() && !g_bar_manager.topmost) {
+    } else if (display_menu_bar_visible()
+               && !display_selection_matches(&g_bar_manager.topmost, bar)) {
       CGRect menu = display_menu_bar_rect(bar->did);
       origin.y += menu.size.height;
     }
@@ -532,15 +535,20 @@ void bar_change_space(struct bar* bar, uint64_t dsid) {
   window_send_to_space(&bar->window, dsid);
 }
 
-struct bar *bar_create(uint32_t did) {
+struct bar *bar_create(uint32_t did, uint32_t adid) {
   struct bar *bar = malloc(sizeof(struct bar));
   memset(bar, 0, sizeof(struct bar));
   bar->hidden = false;
   bar->mouse_over = false;
   bar->did = did;
+  // adid has to land before anything evaluates a display selector against this
+  // bar, and bar_create_window below already does.
+  bar->adid = adid;
   bar->dsid = display_space_id(did);
   bar->sid = mission_control_index(bar->dsid);
-  bar->shown = bar_manager_bar_belongs_on_space(&g_bar_manager, bar->dsid);
+  bar->shown = bar_manager_bar_belongs_on_space(&g_bar_manager,
+                                                bar,
+                                                bar->dsid      );
   g_bar_manager.bar_needs_update = true;
   bar_create_window(bar);
   return bar;

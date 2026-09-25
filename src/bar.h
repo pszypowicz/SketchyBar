@@ -12,11 +12,12 @@ struct bar {
   uint32_t dsid;
   uint32_t did;
   uint32_t adid;
+  uint32_t window_level;
 
   struct window window;
 };
 
-struct bar *bar_create(uint32_t did);
+struct bar *bar_create(uint32_t did, uint32_t adid);
 void bar_close_window(struct bar* bar);
 void bar_destroy(struct bar* bar);
 void bar_set_hidden(struct bar* bar, bool hidden);
