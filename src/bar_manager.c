@@ -348,7 +348,8 @@ void display_selection_apply(struct bar_manager* bar_manager, struct display_sel
                                                    selection->disabled,
                                                    selector            );
     selection->disabled &= ~selector;
-    selection->enabled |= selector;
+    if (!(selection->enabled & DISPLAY_SELECTOR_ALL))
+      selection->enabled |= selector;
   } else {
     selection->enabled = display_selector_without(bar_manager,
                                                   selection->enabled,
