@@ -11,6 +11,11 @@
 
 extern struct bar_manager g_bar_manager;
 
+// Displays the following --bar properties apply to. A --display domain sets it,
+// and every message starts over at "all", so a selector never leaks between
+// invocations of the client.
+static uint32_t g_display_selector = DISPLAY_SELECTOR_ALL;
+
 static struct bar_item** get_bar_items_for_regex(struct token reg, FILE* rsp, uint32_t* count) {
   struct bar_item** bar_items = NULL;
 
@@ -398,12 +403,17 @@ static bool handle_domain_bar(FILE *rsp, struct token domain, char *message) {
     if (token_equals(token, ARGUMENT_WINDOW)) {
       needs_refresh = bar_manager_set_topmost(&g_bar_manager,
                                               TOPMOST_LEVEL_WINDOW,
+                                              g_display_selector,
                                               true                 );
     } else {
+      bool previous = bar_manager_topmost_active(&g_bar_manager,
+                                                 g_display_selector);
+
       needs_refresh = bar_manager_set_topmost(&g_bar_manager,
                                               TOPMOST_LEVEL_ALL,
+                                              g_display_selector,
                                               evaluate_boolean_state(token,
-                                                                     g_bar_manager.topmost));
+                                                                     previous));
     }
   } else if (token_equals(command, PROPERTY_STICKY)) {
     struct token token = get_token(&message);
@@ -444,9 +454,11 @@ static bool handle_domain_bar(FILE *rsp, struct token domain, char *message) {
             token_to_int(token)                         );
   } else if (token_equals(command, PROPERTY_SHOW_IN_FULLSCREEN)) {
       struct token token = get_token(&message);
+      bool previous = bar_manager_show_in_fullscreen_active(&g_bar_manager,
+                                                            g_display_selector);
 
       needs_refresh = bar_manager_set_show_in_fullscreen(&g_bar_manager,
-          evaluate_boolean_state(token, g_bar_manager.show_in_fullscreen));
+          g_display_selector, evaluate_boolean_state(token, previous));
   } else
     needs_refresh = background_parse_sub_domain(&g_bar_manager.background, rsp, command, message);
 
@@ -603,6 +615,7 @@ void handle_message_mach(struct mach_buffer* buffer) {
 
   g_bar_manager.animator.interp_function = '\0';
   g_bar_manager.animator.duration = 0;
+  g_display_selector = DISPLAY_SELECTOR_ALL;
   bar_manager_freeze(&g_bar_manager);
   struct token command = get_token(&message);
   bool bar_needs_refresh = false;
@@ -665,6 +678,23 @@ void handle_message_mach(struct mach_buffer* buffer) {
     } else if (token_equals(command, DOMAIN_ANIMATE)) {
       g_bar_manager.animator.interp_function = get_token(&message).text[0];
       g_bar_manager.animator.duration = token_to_uint32t(get_token(&message));
+    } else if (token_equals(command, DOMAIN_DISPLAY)) {
+      struct token token = get_token(&message);
+      char* selector_text = token_to_string(token);
+      bool error = false;
+      uint32_t selector = display_selector_parse(token, &error);
+
+      // A rejected selector narrows to no display rather than falling back to
+      // all of them, so a typo cannot silently apply the properties everywhere.
+      if (error || selector == DISPLAY_SELECTOR_NONE) {
+        respond(rsp, "[!] Display: Invalid display selector '%s'\n",
+                     selector_text ? selector_text : ""             );
+        g_display_selector = DISPLAY_SELECTOR_NONE;
+      } else {
+        g_display_selector = selector;
+      }
+
+      if (selector_text) free(selector_text);
     } else if (token_equals(command, DOMAIN_BAR)) {
       struct token token = get_token(&message);
       while (token.text && token.length > 0) {
