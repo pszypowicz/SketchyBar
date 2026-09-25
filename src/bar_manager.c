@@ -1322,6 +1322,16 @@ void bar_manager_destroy(struct bar_manager* bar_manager) {
   image_destroy(&bar_manager->current_artwork);
 }
 
+// topmost reports on for both levels, so the level needs its own field. The
+// level is one setting, and it only applies where topmost is on.
+static char* format_topmost_level(struct bar_manager* bar_manager) {
+  if (bar_manager->topmost.enabled == DISPLAY_SELECTOR_NONE)
+    return ARGUMENT_COMMON_VAL_OFF;
+  return bar_manager->topmost_level == TOPMOST_LEVEL_WINDOW
+         ? ARGUMENT_WINDOW
+         : ARGUMENT_DISPLAY_ALL;
+}
+
 void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
   char indent[] = { "\t" };
   char topmost[256];
@@ -1336,6 +1346,7 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
   fprintf(rsp, "{\n"
                "%s\"position\": \"%s\",\n"
                "%s\"topmost\": \"%s\",\n"
+               "%s\"topmost_level\": \"%s\",\n"
                "%s\"sticky\": \"%s\",\n"
                "%s\"hidden\": \"%s\",\n"
                "%s\"shadow\": \"%s\",\n"
@@ -1346,6 +1357,7 @@ void bar_manager_serialize(struct bar_manager* bar_manager, FILE* rsp) {
                indent, bar_manager->position == POSITION_BOTTOM
                                               ? "bottom" : "top",
                indent, topmost,
+               indent, format_topmost_level(bar_manager),
                indent, format_bool(bar_manager->sticky),
                indent, format_bool(bar_manager->any_bar_hidden),
                indent, format_bool(bar_manager->shadow),
