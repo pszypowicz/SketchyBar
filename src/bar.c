@@ -546,6 +546,7 @@ struct bar *bar_create(uint32_t did, uint32_t adid) {
   bar->adid = adid;
   bar->dsid = display_space_id(did);
   bar->sid = mission_control_index(bar->dsid);
+  bar->on_fullscreen_space = SLSSpaceGetType(g_connection, bar->dsid) == 4;
   bar->shown = bar_manager_bar_belongs_on_space(&g_bar_manager,
                                                 bar,
                                                 bar->dsid      );

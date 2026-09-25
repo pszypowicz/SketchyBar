@@ -417,6 +417,11 @@ void display_selection_format(struct display_selection* selection, char* buffer,
 }
 
 uint32_t bar_manager_window_level(struct bar_manager* bar_manager, struct bar* bar) {
+  // On a fullscreen space macOS draws a menu bar backdrop at the main menu
+  // level, and on a notched display it spans the strip beside the camera. A
+  // bar kept there by show_in_fullscreen is hidden under it at any lower level.
+  if (bar->on_fullscreen_space) return kCGStatusWindowLevel;
+
   if (!display_selection_matches(&bar_manager->topmost, bar))
     return kCGBackstopMenuLevel;
 
@@ -445,6 +450,7 @@ bool bar_manager_update_shown(struct bar_manager* bar_manager) {
   for (int i = 0; i < bar_manager->bar_count; i++) {
     struct bar* bar = bar_manager->bars[i];
     uint64_t dsid = display_space_id(bar->did);
+    bar->on_fullscreen_space = SLSSpaceGetType(g_connection, dsid) == 4;
     bool was_shown = bar->shown;
     bar->shown = bar_manager_bar_belongs_on_space(bar_manager, bar, dsid);
 
@@ -1179,15 +1185,27 @@ void bar_manager_handle_space_change(struct bar_manager* bar_manager, bool force
     uint64_t dsid = display_space_id(bar_manager->bars[i]->did);
     bar_manager->bars[i]->sid = mission_control_index(dsid);
 
+    bool was_fullscreen = bar_manager->bars[i]->on_fullscreen_space;
+    bar_manager->bars[i]->on_fullscreen_space
+                             = SLSSpaceGetType(g_connection, dsid) == 4;
+
     bool was_shown = bar_manager->bars[i]->shown;
     bar_manager->bars[i]->shown = bar_manager_bar_belongs_on_space(
                                                        bar_manager,
                                                        bar_manager->bars[i],
                                                        dsid                 );
 
+    // A shown bar that moves between a fullscreen and a normal space needs its
+    // window level applied again, see bar_manager_window_level.
+    bool level_changed = bar_manager->bars[i]->shown
+                         && was_fullscreen
+                            != bar_manager->bars[i]->on_fullscreen_space;
+
     bar_manager->needs_ordering |= !was_shown && bar_manager->bars[i]->shown;
+    bar_manager->needs_ordering |= level_changed;
     force_refresh |= !was_shown && bar_manager->bars[i]->shown;
     force_refresh |= !bar_manager->bars[i]->shown && was_shown;
+    force_refresh |= level_changed;
 
     if (bar_manager->bars[i]->dsid != dsid) {
       bar_manager->bars[i]->dsid = dsid;
